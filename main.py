@@ -9,3 +9,9 @@ app = FastAPI()
 def read_root():
     # FastAPI auto-converts Python dict to JSON response
     return {"message": "Hello World"}
+
+# Path parameter: {user_id} is a dynamic variable in the URL
+@app.get("/users/{user_id}")
+def read_user(user_id: int):
+    # user_id is extracted from URL and validated as integer
+    return {"user_id": user_id, "message": f"Hello user {user_id}"}
