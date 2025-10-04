@@ -1,0 +1,11 @@
+# Python cache files
+__pycache__/
+*.pyc
+*.pyo
+
+# Virtual environment (if we create one later)
+venv/
+env/
+
+# Claude Code settings
+.claude/
