@@ -15,3 +15,4 @@ def read_root():
 def read_user(user_id: int):
     # user_id is extracted from URL and validated as integer
     return {"user_id": user_id, "message": f"Hello user {user_id}"}
+#hello from origin
