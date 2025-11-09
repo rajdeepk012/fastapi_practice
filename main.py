@@ -72,3 +72,63 @@ def create_message(message: Message):
         from_user=message.user_name,
         timestamp=message.timestamp
     )
+
+# ========== CHATBOT SECTION ==========
+
+# Chatbot request model
+class ChatRequest(BaseModel):
+    user_message: str          # User's input message
+    user_name: str = "User"    # Optional user name (defaults to "User")
+
+# Chatbot response model
+class ChatResponse(BaseModel):
+    bot_reply: str             # Bot's response
+    user_message: str          # Echo back user's message
+    user_name: str             # User's name
+
+# Simple chatbot logic function
+def chatbot_reply(user_input: str) -> str:
+    """
+    Rule-based chatbot that matches patterns and returns responses
+    """
+    # Convert to lowercase for matching
+    message = user_input.lower().strip()
+
+    # Greeting patterns
+    if any(word in message for word in ["hello", "hi", "hey", "greetings"]):
+        return "Hi there! How can I help you today?"
+
+    # Name questions
+    if "your name" in message or "who are you" in message:
+        return "I'm FastAPI Bot, your friendly assistant built with FastAPI!"
+
+    # FastAPI questions
+    if "fastapi" in message:
+        return "FastAPI is a modern, fast Python web framework for building APIs. It's awesome!"
+
+    # How are you
+    if "how are you" in message:
+        return "I'm doing great! Thanks for asking. How can I assist you?"
+
+    # Help requests
+    if "help" in message:
+        return "I can chat with you! Try asking me about FastAPI, say hello, or ask my name!"
+
+    # Default response for unknown inputs
+    return "Interesting! I'm still learning. Can you try asking something else?"
+
+# Chatbot endpoint
+@app.post("/chat", response_model=ChatResponse)
+def chat(request: ChatRequest):
+    """
+    Simple chatbot endpoint that processes user messages and returns bot replies
+    """
+    # Get bot's reply using chatbot logic
+    bot_response = chatbot_reply(request.user_message)
+
+    # Return structured response
+    return ChatResponse(
+        bot_reply=bot_response,
+        user_message=request.user_message,
+        user_name=request.user_name
+    )

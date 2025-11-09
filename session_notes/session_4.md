@@ -96,8 +96,8 @@ Content-Type: application/json
 ### Pydantic Models - Data Classes
 
 **What is Pydantic?**
-- Python library for data validation and parsing
-- Uses type hints to validate data automatically
+- Python library for data validation and parsing #Parsing = breaking down raw input and converting it into a usable, structured form.
+- Uses type hints and models  to validate data automatically
 - FastAPI uses it for request/response validation
 
 **BaseModel:**

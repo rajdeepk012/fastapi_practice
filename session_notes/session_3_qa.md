@@ -467,7 +467,7 @@ curl http://127.0.0.1:9999/
 ---
 
 #### Ports 49152-65535 (Dynamic/Private Ports)
-- Temporary/ephemeral ports
+- Temporary/ephemeral ports 			#The word ephemeral means short-lived, temporary, not permanent.
 - Often used by system for outgoing connections
 - Can also use for your apps
 
