@@ -71,4 +71,3 @@ class Conversation(Base):
     # This is NOT a column! It's a Python convenience
     user = relationship("User", back_populates="conversations")
     # back_populates="conversations": Links to 'conversations' in User model
-    

@@ -1,187 +1,353 @@
-# Import the FastAPI class from fastapi library
-from fastapi import FastAPI, HTTPException, status
-# Import BaseModel from pydantic for data validation
-from pydantic import BaseModel
-# Import datetime for timestamps
-from datetime import datetime
-# Import typing for type hints
+# FastAPI application with complete database integration
+from fastapi import FastAPI, HTTPException, status, Depends
+from sqlalchemy.orm import Session
 from typing import List
 
-# Create an instance of FastAPI application
-app = FastAPI()
+# Import our database modules
+import crud #queries
+import schemas #api validation
+import models #db table map
+from database import engine, get_db
 
-# Pydantic model: defines the structure and types for request body
-class Message(BaseModel):
-    text: str           # Message text (required)
-    user_name: str      # Sender's name (required)
-    timestamp: int = 0  # Unix timestamp (optional, default 0)
+# Import for in-memory chatbot (from previous sessions)
+from datetime import datetime
 
-# Response model: defines what the API returns
-class MessageResponse(BaseModel):
-    id: int                    # Message ID
-    status: str                # Status message
-    message_text: str          # The message content
-    from_user: str             # Sender's name
-    timestamp: int             # When message was received
+# Create database tables (if they don't exist)
+# Note: In production, use Alembic migrations instead
+models.Base.metadata.create_all(bind=engine)
 
-# Route decorator: handles GET requests at root endpoint "/"
+# Create FastAPI application
+app = FastAPI(
+    title="Chatbot API",
+    description="FastAPI application with MySQL database integration",
+    version="2.0.0"
+)
+
+# ========== ROOT ENDPOINT ==========
+
 @app.get("/")
 def read_root():
-    # FastAPI auto-converts Python dict to JSON response
-    return {"message": "Hello World"}
+    """Root endpoint - API info"""
+    return {
+        "message": "Chatbot API with Database Integration",
+        "version": "2.0.0",
+        "endpoints": {
+            "users": "/users",
+            "conversations": "/conversations",
+            "chatbot": "/chat",
+            "docs": "/docs"
+        }
+    }
 
-# Path parameter with error handling
-@app.get("/users/{user_id}")
-def read_user(user_id: int):
-    # Simulate checking if user exists (in real app: check database)
-    # For demo: only users 1-100 exist
-    if user_id < 1 or user_id > 100:
-        # Raise 404 error if user doesn't exist
+# ========== USER ENDPOINTS ==========
+
+@app.post("/users", response_model=schemas.User, status_code=status.HTTP_201_CREATED)
+def create_user(user: schemas.UserCreate, db: Session = Depends(get_db)):
+    """
+    Create a new user
+
+    - **username**: User's username (required)
+    - **email**: User's email address (required, unique)
+    """
+    # Check if email already exists
+    existing_user = crud.get_user_by_email(db, email=user.email)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+
+    # Create user
+    return crud.create_user(db=db, user=user)
+
+
+@app.get("/users", response_model=List[schemas.User])
+def get_users(skip: int = 0, limit: int = 100, db: Session = Depends(get_db)):
+    """
+    Get list of users with pagination
+
+    - **skip**: Number of users to skip (default: 0)
+    - **limit**: Maximum number of users to return (default: 100)
+    """
+    users = crud.get_users(db, skip=skip, limit=limit)
+    return users
+
+
+@app.get("/users/{user_id}", response_model=schemas.User)
+def get_user(user_id: int, db: Session = Depends(get_db)):
+    """
+    Get a specific user by ID
+
+    - **user_id**: The ID of the user to retrieve
+    """
+    db_user = crud.get_user(db, user_id=user_id)
+    if db_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {user_id} not found"
+        )
+    return db_user
+
+
+@app.put("/users/{user_id}", response_model=schemas.User)
+def update_user(
+    user_id: int,
+    user_update: schemas.UserUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing user
+
+    - **user_id**: The ID of the user to update
+    - **username**: New username (optional)
+    - **email**: New email (optional)
+    """
+    db_user = crud.update_user(db, user_id=user_id, user_update=user_update)
+    if db_user is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {user_id} not found"
+        )
+    return db_user
+
+
+@app.delete("/users/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_user(user_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a user
+
+    - **user_id**: The ID of the user to delete
+    """
+    deleted = crud.delete_user(db, user_id=user_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {user_id} not found"
+        )
+    return None  # 204 No Content
+
+
+# ========== CONVERSATION ENDPOINTS ==========
+
+@app.post("/conversations", response_model=schemas.Conversation, status_code=status.HTTP_201_CREATED)
+def create_conversation(
+    conversation: schemas.ConversationCreate,
+    db: Session = Depends(get_db)
+):
+    """
+    Create a new conversation
+
+    - **user_id**: ID of the user (must exist)
+    - **message**: User's message
+    - **bot_reply**: Bot's reply (optional)
+    """
+    # Verify user exists
+    user = crud.get_user(db, user_id=conversation.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {conversation.user_id} not found"
+        )
+
+    return crud.create_conversation(db=db, conversation=conversation)
+
+
+@app.get("/conversations", response_model=List[schemas.Conversation])
+def get_conversations(
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    Get list of all conversations with pagination
+
+    - **skip**: Number of conversations to skip (default: 0)
+    - **limit**: Maximum number of conversations to return (default: 100)
+    """
+    conversations = crud.get_conversations(db, skip=skip, limit=limit)
+    return conversations
+
+
+@app.get("/conversations/{conversation_id}", response_model=schemas.Conversation)
+def get_conversation(conversation_id: int, db: Session = Depends(get_db)):
+    """
+    Get a specific conversation by ID
+
+    - **conversation_id**: The ID of the conversation to retrieve
+    """
+    conversation = crud.get_conversation(db, conversation_id=conversation_id)
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID {conversation_id} not found"
+        )
+    return conversation
+
+
+@app.get("/users/{user_id}/conversations", response_model=List[schemas.Conversation])
+def get_user_conversations(
+    user_id: int,
+    skip: int = 0,
+    limit: int = 100,
+    db: Session = Depends(get_db)
+):
+    """
+    Get all conversations for a specific user
+
+    - **user_id**: The ID of the user
+    - **skip**: Number of conversations to skip (default: 0)
+    - **limit**: Maximum number of conversations to return (default: 100)
+    """
+    # Verify user exists
+    user = crud.get_user(db, user_id=user_id)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"User with ID {user_id} not found"
         )
 
-    # User exists, return data
-    return {"user_id": user_id, "message": f"Hello user {user_id}"}
+    conversations = crud.get_user_conversations(db, user_id=user_id, skip=skip, limit=limit)
+    return conversations
 
-# Query parameters: variables passed after ? in URL
-@app.get("/search")
-def search_items(q: str):
-    # q is extracted from URL query string: /search?q=laptop
-    return {"query": q, "message": f"Searching for: {q}"}
 
-# Optional query parameter with default value
-@app.get("/items")
-def read_items(skip: int = 0, limit: int = 10):
-    # skip and limit are optional - have default values
-    # /items → skip=0, limit=10
-    # /items?skip=5 → skip=5, limit=10
-    # /items?skip=5&limit=20 → skip=5, limit=20
-    return {"skip": skip, "limit": limit}
+@app.put("/conversations/{conversation_id}", response_model=schemas.Conversation)
+def update_conversation(
+    conversation_id: int,
+    conversation_update: schemas.ConversationUpdate,
+    db: Session = Depends(get_db)
+):
+    """
+    Update an existing conversation
 
-# POST request with response model and status code
-@app.post("/messages", response_model=MessageResponse, status_code=status.HTTP_201_CREATED)
-def create_message(message: Message):
-    # message parameter automatically validated against Message model
-    # In real app: save to database and get real ID
-    # For demo: generate fake ID
-    fake_id = 42
-
-    # Return response matching MessageResponse model
-    return MessageResponse(
-        id=fake_id,
-        status="created",
-        message_text=message.text,
-        from_user=message.user_name,
-        timestamp=message.timestamp
+    - **conversation_id**: The ID of the conversation to update
+    - **message**: New message (optional)
+    - **bot_reply**: New bot reply (optional)
+    """
+    conversation = crud.update_conversation(
+        db,
+        conversation_id=conversation_id,
+        conversation_update=conversation_update
     )
+    if conversation is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID {conversation_id} not found"
+        )
+    return conversation
 
-# ========== CHATBOT SECTION ==========
 
-# In-memory storage for conversation history
-# Format: {session_id: [list of message exchanges]}
-conversation_history = {}
+@app.delete("/conversations/{conversation_id}", status_code=status.HTTP_204_NO_CONTENT)
+def delete_conversation(conversation_id: int, db: Session = Depends(get_db)):
+    """
+    Delete a conversation
 
-# Chatbot request model
+    - **conversation_id**: The ID of the conversation to delete
+    """
+    deleted = crud.delete_conversation(db, conversation_id=conversation_id)
+    if not deleted:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Conversation with ID {conversation_id} not found"
+        )
+    return None  # 204 No Content
+
+
+# ========== CHATBOT ENDPOINT (Enhanced with Database) ==========
+
+# Pydantic models for chatbot (simpler than full conversation model)
+from pydantic import BaseModel
+
 class ChatRequest(BaseModel):
-    user_message: str            # User's input message
-    user_name: str = "User"      # Optional user name (defaults to "User")
-    session_id: str = "default"  # Session ID to track conversations
-
-# Chatbot response model
-class ChatResponse(BaseModel):
-    bot_reply: str               # Bot's response
-    user_message: str            # Echo back user's message
-    user_name: str               # User's name
-    session_id: str              # Session identifier
-    timestamp: str               # When the message was sent
-
-# Model for conversation history entry
-class ConversationEntry(BaseModel):
     user_message: str
+    user_id: int  # Now requires user_id to link to database
+
+
+class ChatResponse(BaseModel):
     bot_reply: str
-    user_name: str
+    user_message: str
+    conversation_id: int  # Return the saved conversation ID
     timestamp: str
 
-# Simple chatbot logic function
+
+# Simple chatbot logic function (from previous sessions)
 def chatbot_reply(user_input: str) -> str:
-    """
-    Rule-based chatbot that matches patterns and returns responses
-    """
-    # Convert to lowercase for matching
+    """Rule-based chatbot that matches patterns and returns responses"""
     message = user_input.lower().strip()
 
-    # Greeting patterns
     if any(word in message for word in ["hello", "hi", "hey", "greetings"]):
         return "Hi there! How can I help you today?"
 
-    # Name questions
     if "your name" in message or "who are you" in message:
         return "I'm FastAPI Bot, your friendly assistant built with FastAPI!"
 
-    # FastAPI questions
     if "fastapi" in message:
         return "FastAPI is a modern, fast Python web framework for building APIs. It's awesome!"
 
-    # How are you
     if "how are you" in message:
         return "I'm doing great! Thanks for asking. How can I assist you?"
 
-    # Help requests
     if "help" in message:
         return "I can chat with you! Try asking me about FastAPI, say hello, or ask my name!"
 
-    # Default response for unknown inputs
     return "Interesting! I'm still learning. Can you try asking something else?"
 
-# Chatbot endpoint with history tracking
+
 @app.post("/chat", response_model=ChatResponse)
-def chat(request: ChatRequest):
+def chat(request: ChatRequest, db: Session = Depends(get_db)):
     """
-    Chatbot endpoint that processes messages and saves conversation history
+    Chatbot endpoint - now saves to database!
+
+    - **user_message**: The message from the user
+    - **user_id**: The ID of the user sending the message
     """
-    # Get bot's reply using chatbot logic
+    # Verify user exists
+    user = crud.get_user(db, user_id=request.user_id)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"User with ID {request.user_id} not found"
+        )
+
+    # Get bot's reply
     bot_response = chatbot_reply(request.user_message)
 
     # Generate timestamp
     timestamp = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
-    # Create conversation entry
-    entry = ConversationEntry(
-        user_message=request.user_message,
-        bot_reply=bot_response,
-        user_name=request.user_name,
-        timestamp=timestamp
+    # Save conversation to database
+    conversation_data = schemas.ConversationCreate(
+        user_id=request.user_id,
+        message=request.user_message,
+        bot_reply=bot_response
     )
+    saved_conversation = crud.create_conversation(db, conversation_data)
 
-    # Save to history (create session if doesn't exist)
-    if request.session_id not in conversation_history:
-        conversation_history[request.session_id] = []
-
-    conversation_history[request.session_id].append(entry)
-
-    # Return structured response
+    # Return response
     return ChatResponse(
         bot_reply=bot_response,
         user_message=request.user_message,
-        user_name=request.user_name,
-        session_id=request.session_id,
+        conversation_id=saved_conversation.id,
         timestamp=timestamp
     )
 
-# Get conversation history endpoint
-@app.get("/chat/history/{session_id}", response_model=List[ConversationEntry])
-def get_history(session_id: str):
-    """
-    Retrieve conversation history for a specific session
-    """
-    # Check if session exists
-    if session_id not in conversation_history:
+
+# ========== UTILITY ENDPOINTS ==========
+
+@app.get("/users/{user_id}/conversation-count")
+def get_user_conversation_count(user_id: int, db: Session = Depends(get_db)):
+    """Get count of conversations for a user"""
+    user = crud.get_user(db, user_id=user_id)
+    if not user:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"No conversation history found for session '{session_id}'"
+            detail=f"User with ID {user_id} not found"
         )
 
-    # Return the conversation history
-    return conversation_history[session_id]
+    count = crud.count_user_conversations(db, user_id=user_id)
+    return {"user_id": user_id, "conversation_count": count}
+
+
+@app.get("/health")
+def health_check():
+    """Health check endpoint"""
+    return {"status": "healthy", "database": "connected"}
