@@ -10,7 +10,7 @@ class User(Base):
     User model representing the users table.
 
     Table: users
-    Columns: id, username, email, created_at
+    Columns: id, username, email, phone_number, created_at
     """
     # Tell SQLAlchemy which table this class maps to
     __tablename__ = "users"
@@ -29,6 +29,10 @@ class User(Base):
     email = Column(String(100), unique=True, nullable=False)
     # unique=True: UNIQUE constraint
     # nullable=False: NOT NULL constraint
+
+    phone_number = Column(String(20), nullable=True)
+    # String(20): VARCHAR(20) in MySQL - stores phone numbers
+    # nullable=True: Column is optional (can be NULL)
 
     created_at = Column(DateTime, server_default=func.now())
     # DateTime: DATETIME in MySQL
