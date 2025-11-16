@@ -3,11 +3,16 @@ from fastapi import FastAPI, HTTPException, status, Depends
 from sqlalchemy.orm import Session
 from typing import List
 
-# Import our database modules
+# Import MySQL database modules
 import crud #queries
 import schemas #api validation
 import models #db table map
 from database import engine, get_db
+
+# Import MongoDB modules
+import mongo_crud
+import mongo_models
+from mongodb import connect_to_mongo, close_mongo_connection, get_database
 
 # Import for in-memory chatbot (from previous sessions)
 from datetime import datetime
@@ -19,9 +24,20 @@ models.Base.metadata.create_all(bind=engine)
 # Create FastAPI application
 app = FastAPI(
     title="Chatbot API",
-    description="FastAPI application with MySQL database integration",
-    version="2.0.0"
+    description="FastAPI application with MySQL and MongoDB integration",
+    version="3.0.0"
 )
+
+# MongoDB Lifecycle Events
+@app.on_event("startup")
+async def startup_db_client():
+    """Connect to MongoDB when app starts"""
+    connect_to_mongo()
+
+@app.on_event("shutdown")
+async def shutdown_db_client():
+    """Close MongoDB connection when app shuts down"""
+    close_mongo_connection()
 
 # ========== ROOT ENDPOINT ==========
 
@@ -351,3 +367,45 @@ def get_user_conversation_count(user_id: int, db: Session = Depends(get_db)):
 def health_check():
     """Health check endpoint"""
     return {"status": "healthy", "database": "connected"}
+
+
+# ========== MONGODB ENDPOINTS ==========
+
+@app.post("/mongo/users", response_model=mongo_models.User, status_code=status.HTTP_201_CREATED)
+async def create_mongo_user(user: mongo_models.UserCreate, db=Depends(get_database)):
+    """Create a new user in MongoDB"""
+    # Check if email already exists
+    existing_user = await mongo_crud.get_user_by_email(db, user.email)
+    if existing_user:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Email already registered"
+        )
+    return await mongo_crud.create_user(db, user)
+
+
+@app.get("/mongo/users", response_model=List[mongo_models.User])
+async def get_mongo_users(skip: int = 0, limit: int = 100, db=Depends(get_database)):
+    """Get list of users from MongoDB with pagination"""
+    return await mongo_crud.get_users(db, skip=skip, limit=limit)
+
+
+@app.get("/mongo/users/{user_id}", response_model=mongo_models.User)
+async def get_mongo_user(user_id: str, db=Depends(get_database)):
+    """Get a specific user from MongoDB by ID"""
+    user = await mongo_crud.get_user(db, user_id)
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    return user
+
+
+@app.post("/mongo/conversations", response_model=mongo_models.Conversation, status_code=status.HTTP_201_CREATED)
+async def create_mongo_conversation(conversation: mongo_models.ConversationCreate, db=Depends(get_database)):
+    """Create a new conversation in MongoDB"""
+    return await mongo_crud.create_conversation(db, conversation)
+
+
+@app.get("/mongo/users/{user_id}/conversations", response_model=List[mongo_models.Conversation])
+async def get_mongo_user_conversations(user_id: str, skip: int = 0, limit: int = 100, db=Depends(get_database)):
+    """Get all conversations for a specific user from MongoDB"""
+    return await mongo_crud.get_user_conversations(db, user_id, skip=skip, limit=limit)
